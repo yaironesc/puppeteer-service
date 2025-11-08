@@ -201,6 +201,31 @@ app.post('/scrape', async (req, res) => {
                 }
             }
             
+            // Extract download count (Play Store format: "1M+", "500K+", "1,000,000+")
+            const downloadText = document.body.textContent || '';
+            // Pattern 1: "1M+", "500K+", "10M+", etc.
+            const downloadMatch1 = downloadText.match(/(\d+(?:\.\d+)?)\s*([MK])\s*\+/i);
+            if (downloadMatch1) {
+                const number = parseFloat(downloadMatch1[1]);
+                const unit = downloadMatch1[2].toUpperCase();
+                if (unit === 'M') {
+                    data.play_store_downloads = Math.floor(number * 1000000);
+                } else if (unit === 'K') {
+                    data.play_store_downloads = Math.floor(number * 1000);
+                }
+            }
+            // Pattern 2: Full numbers like "1,000,000+"
+            else {
+                const downloadMatch2 = downloadText.match(/([\d,]+)\s*\+/);
+                if (downloadMatch2) {
+                    const numberStr = downloadMatch2[1].replace(/,/g, '');
+                    const num = parseInt(numberStr);
+                    if (num > 1000) {
+                        data.play_store_downloads = num;
+                    }
+                }
+            }
+            
             return data;
         });
         
