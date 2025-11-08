@@ -1,6 +1,6 @@
 FROM node:18-slim
 
-# Install dependencies for Puppeteer and apkeep
+# Install dependencies for Puppeteer
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -26,16 +26,7 @@ RUN apt-get update && apt-get install -y \
     xdg-utils \
     libu2f-udev \
     libvulkan1 \
-    curl \
-    unzip \
     && rm -rf /var/lib/apt/lists/*
-
-# Install apkeep (APK downloader tool)
-# Using curl as it's more reliable than wget for GitHub releases
-RUN curl -L -o /usr/local/bin/apkeep \
-    https://github.com/EFForg/apkeep/releases/latest/download/apkeep-x86_64-unknown-linux-musl && \
-    chmod +x /usr/local/bin/apkeep && \
-    apkeep --version || echo "apkeep installed (version check may fail)"
 
 # Create app directory
 WORKDIR /app
