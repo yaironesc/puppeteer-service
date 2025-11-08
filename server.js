@@ -181,6 +181,26 @@ app.post('/scrape', async (req, res) => {
                 data.price = 0; // Default to free
             }
             
+            // Extract publisher/author
+            const publisherSelectors = [
+                'a[href*="/store/apps/developer"]',
+                'a[itemprop="author"]',
+                '[itemprop="author"]',
+                '.VfPpkd-StrnGf-rymPhb a',
+                '.VfPpkd-StrnGf-rymPhb-ibnC6b a'
+            ];
+            
+            for (const selector of publisherSelectors) {
+                const publisherEl = document.querySelector(selector);
+                if (publisherEl) {
+                    const publisherText = publisherEl.textContent.trim();
+                    if (publisherText && publisherText.length > 2) {
+                        data.publisher = publisherText;
+                        break;
+                    }
+                }
+            }
+            
             return data;
         });
         
