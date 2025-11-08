@@ -203,11 +203,261 @@ app.post('/scrape', async (req, res) => {
     }
 });
 
+// Generic scraper endpoint - for any website
+app.post('/scrape-generic', async (req, res) => {
+    const { url, selectors, waitFor, timeout = 30000 } = req.body;
+    
+    if (!url) {
+        return res.status(400).json({ 
+            success: false, 
+            error: 'URL is required' 
+        });
+    }
+    
+    if (!browser) {
+        await initBrowser();
+    }
+    
+    let page = null;
+    
+    try {
+        page = await browser.newPage();
+        
+        // Set realistic viewport and user agent
+        await page.setViewport({ width: 1920, height: 1080 });
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        // Navigate to page
+        await page.goto(url, { 
+            waitUntil: waitFor || 'networkidle2',
+            timeout: timeout 
+        });
+        
+        // Wait for specific selector if provided
+        if (req.body.waitForSelector) {
+            await page.waitForSelector(req.body.waitForSelector, { timeout: timeout });
+        } else {
+            // Default wait
+            await page.waitForTimeout(2000);
+        }
+        
+        // Extract data using custom selectors or return full HTML
+        let data = {};
+        
+        if (selectors && typeof selectors === 'object') {
+            // Custom selectors provided
+            data = await page.evaluate((sel) => {
+                const result = {};
+                for (const [key, selector] of Object.entries(sel)) {
+                    if (typeof selector === 'string') {
+                        // Single selector
+                        const element = document.querySelector(selector);
+                        if (element) {
+                            result[key] = element.textContent?.trim() || element.innerHTML || element.getAttribute('src') || element.getAttribute('href') || '';
+                        }
+                    } else if (Array.isArray(selector)) {
+                        // Multiple selectors (try each until one works)
+                        for (const sel of selector) {
+                            const element = document.querySelector(sel);
+                            if (element) {
+                                result[key] = element.textContent?.trim() || element.innerHTML || element.getAttribute('src') || element.getAttribute('href') || '';
+                                break;
+                            }
+                        }
+                    } else if (selector.selector) {
+                        // Advanced selector with options
+                        const element = document.querySelector(selector.selector);
+                        if (element) {
+                            if (selector.attribute) {
+                                result[key] = element.getAttribute(selector.attribute);
+                            } else if (selector.html) {
+                                result[key] = element.innerHTML;
+                            } else {
+                                result[key] = element.textContent?.trim();
+                            }
+                        }
+                    }
+                }
+                return result;
+            }, selectors);
+        } else {
+            // No selectors provided, return page info
+            data = await page.evaluate(() => {
+                return {
+                    title: document.title,
+                    url: window.location.href,
+                    html: document.documentElement.outerHTML.substring(0, 10000) // First 10KB
+                };
+            });
+        }
+        
+        // Get all images if requested
+        if (req.body.extractImages) {
+            const images = await page.evaluate(() => {
+                const imgs = [];
+                document.querySelectorAll('img').forEach(img => {
+                    const src = img.src || img.getAttribute('data-src');
+                    if (src && !src.startsWith('data:')) {
+                        imgs.push({
+                            src: src,
+                            alt: img.alt || '',
+                            width: img.naturalWidth,
+                            height: img.naturalHeight
+                        });
+                    }
+                });
+                return imgs;
+            });
+            data.images = images;
+        }
+        
+        // Get all links if requested
+        if (req.body.extractLinks) {
+            const links = await page.evaluate(() => {
+                const linkList = [];
+                document.querySelectorAll('a[href]').forEach(link => {
+                    const href = link.getAttribute('href');
+                    if (href && !href.startsWith('javascript:')) {
+                        linkList.push({
+                            href: href,
+                            text: link.textContent?.trim() || '',
+                            title: link.getAttribute('title') || ''
+                        });
+                    }
+                });
+                return linkList;
+            });
+            data.links = links;
+        }
+        
+        await page.close();
+        
+        res.json({
+            success: true,
+            data: data,
+            url: url
+        });
+        
+    } catch (error) {
+        if (page) {
+            await page.close().catch(() => {});
+        }
+        console.error('Scraping error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message || 'Error scraping website'
+        });
+    }
+});
+
+// Screenshot endpoint - take screenshot of any page
+app.post('/screenshot', async (req, res) => {
+    const { url, fullPage = false, width = 1920, height = 1080 } = req.body;
+    
+    if (!url) {
+        return res.status(400).json({ 
+            success: false, 
+            error: 'URL is required' 
+        });
+    }
+    
+    if (!browser) {
+        await initBrowser();
+    }
+    
+    let page = null;
+    
+    try {
+        page = await browser.newPage();
+        await page.setViewport({ width, height });
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+        await page.waitForTimeout(2000);
+        
+        const screenshot = await page.screenshot({ 
+            fullPage,
+            type: 'png',
+            encoding: 'base64'
+        });
+        
+        await page.close();
+        
+        res.json({
+            success: true,
+            screenshot: `data:image/png;base64,${screenshot}`,
+            url: url
+        });
+        
+    } catch (error) {
+        if (page) {
+            await page.close().catch(() => {});
+        }
+        res.status(500).json({
+            success: false,
+            error: error.message || 'Error taking screenshot'
+        });
+    }
+});
+
+// PDF endpoint - generate PDF of any page
+app.post('/pdf', async (req, res) => {
+    const { url, format = 'A4' } = req.body;
+    
+    if (!url) {
+        return res.status(400).json({ 
+            success: false, 
+            error: 'URL is required' 
+        });
+    }
+    
+    if (!browser) {
+        await initBrowser();
+    }
+    
+    let page = null;
+    
+    try {
+        page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+        await page.waitForTimeout(2000);
+        
+        const pdf = await page.pdf({ 
+            format: format,
+            printBackground: true
+        });
+        
+        await page.close();
+        
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="page.pdf"`);
+        res.send(pdf);
+        
+    } catch (error) {
+        if (page) {
+            await page.close().catch(() => {});
+        }
+        res.status(500).json({
+            success: false,
+            error: error.message || 'Error generating PDF'
+        });
+    }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
-        browser: browser ? 'initialized' : 'not initialized' 
+        browser: browser ? 'initialized' : 'not initialized',
+        endpoints: [
+            'POST /scrape - Scrape Play Store apps',
+            'POST /scrape-generic - Scrape any website with custom selectors',
+            'POST /screenshot - Take screenshot of any page',
+            'POST /pdf - Generate PDF of any page',
+            'GET /health - Health check'
+        ]
     });
 });
 
